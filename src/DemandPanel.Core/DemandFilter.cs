@@ -18,19 +18,19 @@ namespace DemandPanel.Core
 
     public readonly struct PanelEntry
     {
-        public PanelEntry(int key, long value, bool dimmed) { Key = key; Value = value; Dimmed = dimmed; }
+        public PanelEntry(int key, long value, bool overBudget) { Key = key; Value = value; OverBudget = overBudget; }
         public int Key { get; }
         public long Value { get; }
-        public bool Dimmed { get; }
+        public bool OverBudget { get; }
     }
 
     public static class DemandFilter
     {
-        public static List<PanelEntry> Build(IEnumerable<ItemFacts> items, bool dimOverBudget)
+        public static List<PanelEntry> Build(IEnumerable<ItemFacts> items)
         {
             return items.Where(item => item.Wanted && item.Removable && !item.OnCounter && !item.Locked)
-                .OrderByDescending(item => item.Value).ThenBy(item => item.Key)
-                .Select(item => new PanelEntry(item.Key, item.Value, dimOverBudget && item.OverBudget)).ToList();
+                .OrderBy(item => item.OverBudget).ThenByDescending(item => item.Value).ThenBy(item => item.Key)
+                .Select(item => new PanelEntry(item.Key, item.Value, item.OverBudget)).ToList();
         }
     }
 }
