@@ -21,7 +21,8 @@ namespace DemandPanel
         // so everything that must go away on disable is created here.
         public void OnEnable()
         {
-            // Remove first so a second OnEnable does not register the option twice.
+            // Registering an id that already exists replaces the old entry (modding guide, Game Options),
+            // so this remove is only an explicit reset before registering.
             ModHelper.RemoveGameOption(ModId, ToggleOptionId);
             ModHelper.AddGameOptionKeyBind(
                 ModId,

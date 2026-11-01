@@ -10,10 +10,13 @@ namespace DemandPanel
 
         private static readonly List<GameItem> currentItems = new List<GameItem>();
 
+        // The panel only works inside the store. At an after-hours location the game moves the
+        // counter's items into a hidden holding inventory and swaps in a different customer.
         public static bool InStore =>
             EmporiumEntry.Instance != null
             && EmporiumEntry.Instance.backInvinvElement != null
-            && PlayerStore.HasInstance;
+            && PlayerStore.HasInstance
+            && !(MapUIManager.Instance != null && MapUIManager.Instance.isOutside);
 
         public static List<GameItem> CurrentItems => currentItems;
 
@@ -51,16 +54,19 @@ namespace DemandPanel
             }
 
             GameGridInventory counter = EmporiumEntry.Instance.backInvinvElement;
+            GameGridInventory counterHolding = EmporiumEntry.Instance.backInvinvElementCounter;
+            // Same arguments as the game's own item tooltip, so the panel shows the number the tooltip shows.
+            GameCharacterItem barterCharacter = OverlayHandler.current?.currentBarterCharacter;
             var facts = new List<ItemFacts>();
             foreach (GameItem item in EmporiumEntry.Instance.GetAllOwnedItems())
             {
                 int key = currentItems.Count;
                 currentItems.Add(item);
-                ScanAncestors(item, counter, out bool onCounter, out bool locked);
+                ScanAncestors(item, counter, counterHolding, out bool onCounter, out bool locked);
                 bool overBudget = client.useClientBudget && !client.HasBudgetLeftToBuy(item);
                 facts.Add(new ItemFacts(
                     key,
-                    item.GetValue(),
+                    item.GetValue(new List<GameCharacterItem>(), barterCharacter),
                     client.IsClientBuyingThisItem(item),
                     item.MayRemove(),
                     onCounter,
@@ -83,7 +89,13 @@ namespace DemandPanel
             TransferDecision decision = TransferGuard.Decide(stillInContainer, removable, counterCanAccept);
             if (decision == TransferDecision.Send)
             {
-                GraphUtils.TryAcceptOnce(counter, item);
+                // TryAcceptOnce returns how many units did not move; the whole stack was requested.
+                int requested = item.unitCount;
+                int notMoved = GraphUtils.TryAcceptOnce(counter, item);
+                if (requested > 0 && notMoved >= requested)
+                {
+                    return TransferDecision.CounterFull;
+                }
             }
             return decision;
         }
@@ -104,8 +116,9 @@ namespace DemandPanel
         }
 
         // One walk up the container chain. An item counts as on the counter when any ancestor
-        // inventory is the counter, and as locked when it or any ancestor item carries the lock tag.
-        private static void ScanAncestors(GameItem item, GameInventory counter, out bool onCounter, out bool locked)
+        // inventory is the counter or the counter's holding inventory, and as locked when it or
+        // any ancestor item carries the lock tag.
+        private static void ScanAncestors(GameItem item, GameInventory counter, GameInventory counterHolding, out bool onCounter, out bool locked)
         {
             onCounter = false;
             locked = false;
@@ -121,7 +134,7 @@ namespace DemandPanel
                 {
                     return;
                 }
-                if (ReferenceEquals(inventory, counter))
+                if (ReferenceEquals(inventory, counter) || ReferenceEquals(inventory, counterHolding))
                 {
                     onCounter = true;
                 }
