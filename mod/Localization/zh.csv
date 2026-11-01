@@ -3,7 +3,8 @@ key_toggle_panel,开关需求面板
 cfg_dim_over_budget,超出客人预算的物品显示为暗色
 cfg_cell_size,面板格子大小
 msg_no_customer,现在没有客人要买东西。
-btn_open_panel,客人要的货
+msg_no_wanted_stock,你的库存里没有这位客人要的商品
+btn_open_panel,查看感兴趣的商品库存
 panel_title,客人要的货（{0}）
 panel_empty,你的物品里没有客人想买的。
 tip_location,位置：{0}

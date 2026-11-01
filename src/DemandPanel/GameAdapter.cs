@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using DemandPanel.Core;
 
@@ -9,6 +10,7 @@ namespace DemandPanel
         private const int MaxDepth = 64;
 
         private static readonly List<GameItem> currentItems = new List<GameItem>();
+        private static readonly HashSet<string> loggedItemErrors = new HashSet<string>();
 
         // The panel only works inside the store. At an after-hours location the game moves the
         // counter's items into a hidden holding inventory and swaps in a different customer.
@@ -62,16 +64,27 @@ namespace DemandPanel
             {
                 int key = currentItems.Count;
                 currentItems.Add(item);
-                ScanAncestors(item, counter, counterHolding, out bool onCounter, out bool locked);
-                bool overBudget = client.useClientBudget && !client.HasBudgetLeftToBuy(item);
-                facts.Add(new ItemFacts(
-                    key,
-                    item.GetValue(new List<GameCharacterItem>(), barterCharacter),
-                    client.IsClientBuyingThisItem(item),
-                    item.MayRemove(),
-                    onCounter,
-                    locked,
-                    overBudget));
+                try
+                {
+                    ScanAncestors(item, counter, counterHolding, out bool onCounter, out bool locked);
+                    bool overBudget = client.useClientBudget && !client.HasBudgetLeftToBuy(item);
+                    facts.Add(new ItemFacts(
+                        key,
+                        item.GetValue(new List<GameCharacterItem>(), barterCharacter),
+                        client.IsClientBuyingThisItem(item),
+                        item.MayRemove(),
+                        onCounter,
+                        locked,
+                        overBudget));
+                }
+                catch (Exception e)
+                {
+                    string identifier = item?.identifier;
+                    if (loggedItemErrors.Add(identifier))
+                    {
+                        ModEntry.Log.Log("Snapshot item " + identifier + " failed: " + e.GetType().Name + ": " + e.Message);
+                    }
+                }
             }
             return DemandFilter.Build(facts, dimOverBudget);
         }

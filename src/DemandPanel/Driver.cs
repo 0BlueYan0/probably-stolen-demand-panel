@@ -50,7 +50,14 @@ namespace DemandPanel
             switch (controller.OnTogglePressed(customer))
             {
                 case PanelCommand.Open:
-                    PanelView.Open(GameAdapter.Snapshot(Settings.DimOverBudget));
+                    var entries = GameAdapter.Snapshot(Settings.DimOverBudget);
+                    if (entries.Count == 0)
+                    {
+                        controller.OnTogglePressed(customer);
+                        PanelView.ShowMessage(Loc.T("msg_no_wanted_stock"));
+                        break;
+                    }
+                    PanelView.Open(entries);
                     nextRefresh = Time.unscaledTime + RefreshSeconds;
                     break;
                 case PanelCommand.Close:

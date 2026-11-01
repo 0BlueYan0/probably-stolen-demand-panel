@@ -30,7 +30,8 @@ namespace DemandPanel
     {
         private const string ButtonName = "DemandPanelBtn";
         private const float Gap = 8f;
-        private const float ButtonWidth = 120f;
+        private const float MinButtonWidth = 120f;
+        private const float ButtonPadding = 16f;
 
         private static GameObject button;
 
@@ -146,16 +147,34 @@ namespace DemandPanel
 
             float height = Mathf.Clamp(resize.height, 24f, 40f);
             float y = resize.yMin + (resize.height - height) * 0.5f;
+            string label = Loc.T("btn_open_panel");
+            var measuringButton = TabletUI.SmallButton(frame, panel, 0f, 0f, MinButtonWidth, height, label, null);
+            if (measuringButton == null)
+            {
+                return;
+            }
+            measuringButton.gameObject.SetActive(false);
+            // The game helper resolves Noto_Sans for the selected locale, or returns null.
+            var localeFont = CustomUIMachineryStyle.Font();
+            if (localeFont != null)
+            {
+                measuringButton.label.font = localeFont;
+            }
+            measuringButton.label.enableAutoSizing = false;
+            measuringButton.label.fontSize = 16f;
+            measuringButton.label.ForceMeshUpdate(true, true);
+            float buttonWidth = Mathf.Max(MinButtonWidth, measuringButton.label.preferredWidth + ButtonPadding);
+            UnityEngine.Object.Destroy(measuringButton.gameObject);
 
             // Left of the leftmost of the two corner controls first, right of the rightmost second.
-            float leftX = Mathf.Min(resize.xMin, close.xMin) - Gap - ButtonWidth;
+            float leftX = Mathf.Min(resize.xMin, close.xMin) - Gap - buttonWidth;
             float rightX = Mathf.Max(resize.xMax, close.xMax) + Gap;
             float x;
-            if (Fits(leftX, y, height, panelRect, resize, close, hasBargain, bargain))
+            if (Fits(leftX, y, buttonWidth, height, panelRect, resize, close, hasBargain, bargain))
             {
                 x = leftX;
             }
-            else if (Fits(rightX, y, height, panelRect, resize, close, hasBargain, bargain))
+            else if (Fits(rightX, y, buttonWidth, height, panelRect, resize, close, hasBargain, bargain))
             {
                 x = rightX;
             }
@@ -167,7 +186,7 @@ namespace DemandPanel
 
             // Coordinates here are measured from the panel's top left corner, downwards, which is what
             // TabletUI.NewRect and SmallButton use (WildNetworkUI.SetRect).
-            var created = TabletUI.SmallButton(frame, panel, x, y, ButtonWidth, height, Loc.T("btn_open_panel"), Driver.TogglePanel);
+            var created = TabletUI.SmallButton(frame, panel, x, y, buttonWidth, height, label, Driver.TogglePanel);
             if (created == null)
             {
                 return;
@@ -208,9 +227,9 @@ namespace DemandPanel
             return bounds.width > 0f && bounds.height > 0f;
         }
 
-        private static bool Fits(float x, float y, float height, Rect panelRect, Rect resize, Rect close, bool hasBargain, Rect bargain)
+        private static bool Fits(float x, float y, float width, float height, Rect panelRect, Rect resize, Rect close, bool hasBargain, Rect bargain)
         {
-            var candidate = new Rect(x, y, ButtonWidth, height);
+            var candidate = new Rect(x, y, width, height);
             if (candidate.xMin < 0f || candidate.xMax > panelRect.width || candidate.yMin < 0f || candidate.yMax > panelRect.height)
             {
                 return false;

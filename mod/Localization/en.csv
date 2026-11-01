@@ -3,7 +3,8 @@ key_toggle_panel,Toggle demand panel
 cfg_dim_over_budget,Dim items over the customer's budget
 cfg_cell_size,Panel cell size
 msg_no_customer,No customer is buying right now.
-btn_open_panel,Wanted Stock
+msg_no_wanted_stock,None of your stock is wanted by this customer
+btn_open_panel,View Wanted Stock
 panel_title,Wanted Stock ({0})
 panel_empty,Nothing you own matches what the customer wants.
 tip_location,Location: {0}
