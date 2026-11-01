@@ -78,6 +78,7 @@ namespace DemandPanel
             var facts = new List<ItemFacts>();
             AddCandidates(store.invElement, store, client, barterCharacter, pool, facts);
             AddCandidates(store.showcaseElement, store, client, barterCharacter, pool, facts);
+            AddCandidates(store.hiddenElement, store, client, barterCharacter, pool, facts);
 
             var ordered = new List<GameItem>();
             foreach (PanelEntry entry in DemandFilter.Build(facts))
@@ -155,59 +156,10 @@ namespace DemandPanel
             }
         }
 
-        // The whitelist of D13. Walks from the item up to the inventory that is not inside any item.
-        // That root must be the main inventory, or the showcase (contraband and stolen goods stay there,
-        // because putting them back would fire the security customer's showcase callbacks).
+        // D18 admits known product sources and hidden storage, while keeping parts/inputs out.
         private static bool IsPullable(GameItem item, EmporiumEntry store)
         {
-            GameItem current = item;
-            GameInventory root = null;
-            bool anyHiddenOrLocked = false;
-            var chain = new List<GameItem>();
-            for (int depth = 0; current != null && depth < MaxDepth; depth++)
-            {
-                chain.Add(current);
-                if (current.IsTag(LockHelper.ITEM_BEHIND_LOCK_TAG) || current.IsTag(ContrabandHelper.ITEM_HIDDEN_TAG))
-                {
-                    anyHiddenOrLocked = true;
-                }
-                if (!ReferenceEquals(current, item) && HasSideEffects(current))
-                {
-                    return false;
-                }
-                GameInventory inventory = current.parentInventory;
-                if (inventory == null || !(inventory is GameGridInventory))
-                {
-                    return false;
-                }
-                GameItem parent = inventory.GetParentItem();
-                if (parent == null)
-                {
-                    root = inventory;
-                    break;
-                }
-                current = parent;
-            }
-            if (root == null || anyHiddenOrLocked)
-            {
-                return false;
-            }
-            if (ReferenceEquals(root, store.invElement))
-            {
-                return true;
-            }
-            if (ReferenceEquals(root, store.showcaseElement))
-            {
-                foreach (GameItem link in chain)
-                {
-                    if (ContrabandHelper.IsContraband(link) || StolenHelper.IsStolenItem(link))
-                    {
-                        return false;
-                    }
-                }
-                return CanUseShowcase(item);
-            }
-            return false;
+            return StockSources.IsStock(item, store, out _);
         }
 
         // A container carries its contents with it, so a clean outer item is not enough.
@@ -225,18 +177,6 @@ namespace DemandPanel
                 }
             }
             return true;
-        }
-
-        // Machines, fridges, locked boxes, equipment and the smuggler bay run logic when an item leaves
-        // or enters them.
-        private static bool HasSideEffects(GameItem container)
-        {
-            return container is GameCharacterItem
-                || container.IsGameItemType("MACHINE")
-                || container.IsTag(MachineFridge.FRIDGE_TAG)
-                || container.IsTag(LockHelper.LOCKED_CONTAINER_TAG)
-                || LockHelper.IsCurrentlyLocked(container)
-                || ContrabandHelper.IsSmugglerBay(container);
         }
 
         public static void ShowMessage(string text)

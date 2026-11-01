@@ -19,6 +19,10 @@ namespace DemandPanel
             public bool Flipped;
             public int Orientation;
             public int UnitCount;
+            public bool HadHiddenTag;
+            public bool Constrained;
+            public bool ProductInventory;
+            public GameItem Owner;
 
             // Number of items between the origin inventory and the store, so that a bag is put back
             // before the items that came out of it.
@@ -72,7 +76,8 @@ namespace DemandPanel
 
         private static MoveResult MoveOne(GameItem item, GameGridInventory grid)
         {
-            if (item == null || item.parentInventory == null || item.unitCount < 1)
+            if (item == null || item.parentInventory == null || item.unitCount < 1
+                || !item.MayRemove() || item.MaxNumRemove() < item.unitCount)
             {
                 return MoveResult.NotMoved;
             }
@@ -81,13 +86,21 @@ namespace DemandPanel
             {
                 return MoveResult.Travelled;
             }
+            if (!StockSources.IsStock(item, EmporiumEntry.Instance, out _))
+            {
+                return MoveResult.NotMoved;
+            }
 
             Origin origin = RecordOrigin(item);
             GridShape previousShape = item.modifiedShape;
             // The grid only accepts tracked items, so the record has to exist before the slot scan.
             records[item] = origin;
             SlotMarker marker = FindFreeSlot(grid, item);
-            if (marker == null)
+            if (marker == null || !ReferenceEquals(marker.item, item)
+                || !ReferenceEquals(marker.inventory, grid) || marker.targetItem != null
+                || marker.itemGridShape == null || marker.numTransfer < item.unitCount
+                || item.unitCount != origin.UnitCount || !item.MayRemove()
+                || item.MaxNumRemove() < item.unitCount)
             {
                 records.Remove(item);
                 return MoveResult.NotMoved;
@@ -111,34 +124,41 @@ namespace DemandPanel
             {
                 return MoveResult.Moved;
             }
-            records.Remove(item);
             if (item.parentInventory == null)
             {
                 // TryAcceptOnce expels the item before it accepts it, so a failed accept leaves it with
                 // no parent, and with the target position already written into modifiedShape.
                 item.modifiedShape = previousShape;
-                if (!Rescue(item, origin, grid))
+                if (!Rescue(item, origin, grid, marker))
                 {
                     ModEntry.Log.Log("ITEM WITHOUT PARENT: " + item.identifier + " could not be re-added anywhere");
                 }
                 else if (ReferenceEquals(item.parentInventory, grid))
                 {
-                    records[item] = origin;
                     return MoveResult.Moved;
                 }
+            }
+            RestoreHiddenTag(item, origin);
+            // A failed rescue remains tracked so a later retry or D19 can still recover it.
+            if (item.parentInventory != null)
+            {
+                records.Remove(item);
             }
             return MoveResult.NotMoved;
         }
 
-        // An item with no parent is in no inventory and would not be saved. Tries its origin, then the
-        // panel grid, then the main inventory, always at the shape it had before the failed move.
-        private static bool Rescue(GameItem item, Origin origin, GameGridInventory grid)
+        // An item with no parent is in no inventory and would not be saved. Never overwrite a slot
+        // during recovery, and never silently relocate a constrained source to main stock.
+        private static bool Rescue(GameItem item, Origin origin, GameGridInventory grid, SlotMarker panelMarker = null)
         {
+            // A previous failed panel accept may have written panel coordinates into the item.
+            GridShape sourceShape = new GridShapeBuilder(item.modifiedShape)
+                .SetTransform(origin.MinX, origin.MinY, origin.Flipped, origin.Orientation).Build();
             GameInventory[] targets =
             {
                 origin.Inventory,
                 grid,
-                EmporiumEntry.Instance?.invElement
+                origin.Constrained ? null : EmporiumEntry.Instance?.invElement
             };
             foreach (GameInventory target in targets)
             {
@@ -146,10 +166,42 @@ namespace DemandPanel
                 {
                     continue;
                 }
+                bool isPanel = ReferenceEquals(target, grid);
+                if (!isPanel && (!IsUsable(target, item) || !HasSpace(target, item, sourceShape)))
+                {
+                    continue;
+                }
                 SelfMove = true;
                 try
                 {
-                    target.UncheckedAccept(item);
+                    if (isPanel)
+                    {
+                        TryPanelRescue(item, grid, panelMarker);
+                    }
+                    else if (ReferenceEquals(target, origin.Inventory) && origin.ProductInventory)
+                    {
+                        item.modifiedShape = sourceShape;
+                        var marker = new SlotMarker
+                        {
+                            item = item, inventory = target, itemGridShape = item.modifiedShape,
+                            numTransfer = item.unitCount, targetItem = null
+                        };
+                        if (ReferenceEquals(target.GetParentItem(), origin.Owner)
+                            && StockSources.IsAllowedInventory(target, item, out bool product) && product
+                            && item.unitCount == origin.UnitCount && item.MaxNumRemove() >= item.unitCount
+                            && item.CheckIsStateValid(target, marker, marker.itemGridShape, item.modifiedState)
+                            && target.CheckAcceptParentShapeStateModifier(item, marker, marker.itemGridShape, item.modifiedState)
+                            && item.MaxNumAdd(marker) >= item.unitCount
+                            && HasSpace(target, item, marker.itemGridShape))
+                        {
+                            marker.AcceptUnchecked();
+                        }
+                    }
+                    else
+                    {
+                        item.modifiedShape = sourceShape;
+                        target.UncheckedAccept(item);
+                    }
                 }
                 catch (Exception e)
                 {
@@ -160,7 +212,39 @@ namespace DemandPanel
                     SelfMove = false;
                 }
             }
+            RestoreHiddenTag(item, origin);
             return item.parentInventory != null;
+        }
+
+        private static void TryPanelRescue(GameItem item, GameGridInventory grid, SlotMarker previous)
+        {
+            if (grid == null || grid.IsInsertLocked() || item.parentInventory != null || item.unitCount < 1)
+            {
+                return;
+            }
+            // The source position and panel position have different coordinate systems. Refresh
+            // the chosen panel cell, or scan another one if a callback occupied it in the meantime.
+            SlotMarker marker = previous?.itemGridShape == null ? null
+                : grid.TryInventorySlot(item, item.unitCount, previous.itemGridShape);
+            if (!IsPanelRescueMarker(marker, item, grid))
+            {
+                marker = FindFreeSlot(grid, item);
+            }
+            if (IsPanelRescueMarker(marker, item, grid))
+            {
+                marker.AcceptUnchecked();
+            }
+        }
+
+        private static bool IsPanelRescueMarker(SlotMarker marker, GameItem item, GameGridInventory grid)
+        {
+            return marker != null && ReferenceEquals(marker.item, item)
+                && ReferenceEquals(marker.inventory, grid) && marker.targetItem == null
+                && marker.itemGridShape != null && marker.numTransfer >= item.unitCount
+                && item.MaxNumRemove() >= item.unitCount && item.MaxNumAdd(marker) >= item.unitCount
+                && HasSpace(grid, item, marker.itemGridShape)
+                && item.CheckIsStateValid(grid, marker, marker.itemGridShape, item.modifiedState)
+                && grid.CheckAcceptParentShapeStateModifier(item, marker, marker.itemGridShape, item.modifiedState);
         }
 
         private static bool HasTrackedAncestor(GameItem item)
@@ -184,6 +268,8 @@ namespace DemandPanel
 
         private static Origin RecordOrigin(GameItem item)
         {
+            StockSources.IsStock(item, EmporiumEntry.Instance, out bool constrained);
+            StockSources.IsAllowedInventory(item.parentInventory, item, out bool productInventory);
             GridShape shape = item.modifiedShape;
             int depth = 0;
             GameItem current = item.parentInventory.GetParentItem();
@@ -200,7 +286,11 @@ namespace DemandPanel
                 Flipped = shape.flipped,
                 Orientation = shape.orientation,
                 UnitCount = item.unitCount,
-                Depth = depth
+                Depth = depth,
+                HadHiddenTag = item.IsTag(ContrabandHelper.ITEM_HIDDEN_TAG),
+                Constrained = constrained,
+                ProductInventory = productInventory,
+                Owner = item.parentInventory.GetParentItem()
             };
         }
 
@@ -275,7 +365,16 @@ namespace DemandPanel
                 bool placed = false;
                 try
                 {
-                    placed = PlaceBack(pair.Key, pair.Value);
+                    if (pair.Key.parentInventory == null)
+                    {
+                        Rescue(pair.Key, pair.Value, grid);
+                        placed = pair.Key.parentInventory != null
+                            && !ReferenceEquals(pair.Key.parentInventory, grid);
+                    }
+                    if (!placed)
+                    {
+                        placed = PlaceBack(pair.Key, pair.Value);
+                    }
                 }
                 catch (Exception e)
                 {
@@ -319,7 +418,8 @@ namespace DemandPanel
             var pending = new List<KeyValuePair<GameItem, Origin>>();
             foreach (KeyValuePair<GameItem, Origin> pair in records)
             {
-                if (!IsGone(pair.Key) && ReferenceEquals(pair.Key.parentInventory, grid))
+                if (!IsGone(pair.Key)
+                    && (pair.Key.parentInventory == null || ReferenceEquals(pair.Key.parentInventory, grid)))
                 {
                     pending.Add(pair);
                 }
@@ -422,8 +522,8 @@ namespace DemandPanel
             ModEntry.Log.Log("Save recovery placed " + item.identifier + " x" + item.unitCount + " in " + target);
         }
 
-        // Exact slot, then any free cell of the origin, then the main inventory. A failure leaves the
-        // item exactly where it is.
+        // Exact origin first, then a legal free cell in that same grid. Hidden and machine sources
+        // remain in the visible panel on failure; only D19 may relocate them before saving.
         private static bool PlaceBack(GameItem item, Origin origin)
         {
             int count = item.unitCount;
@@ -432,25 +532,30 @@ namespace DemandPanel
                 return false;
             }
 
-            if (IsUsable(origin.Inventory)
+            if (IsUsable(origin.Inventory, item)
                 && (!ReferenceEquals(origin.Inventory, EmporiumEntry.Instance?.showcaseElement)
                     || GameAdapter.CanUseShowcase(item)))
             {
                 GridShape exact = new GridShapeBuilder(item.modifiedShape)
                     .SetTransform(origin.MinX, origin.MinY, origin.Flipped, origin.Orientation).Build();
-                if (TryMove(item, origin.Inventory.TryInventorySlot(item, count, exact), count))
+                SlotMarker normal = origin.Inventory.TryInventorySlot(item, count, exact);
+                if ((normal != null && ReferenceEquals(normal.inventory, origin.Inventory)
+                        && TryMove(item, normal, count))
+                    || (origin.ProductInventory && TryOriginalUnchecked(item, origin, exact)))
                 {
+                    RestoreHiddenTag(item, origin);
                     return true;
                 }
                 if (origin.Inventory is GameGridInventory originGrid
                     && TryMove(item, FindFreeSlot(originGrid, item), count))
                 {
+                    RestoreHiddenTag(item, origin);
                     return true;
                 }
             }
 
             GameGridInventory main = EmporiumEntry.Instance?.invElement;
-            if (main != null && !ReferenceEquals(main, origin.Inventory))
+            if (!origin.Constrained && main != null && !ReferenceEquals(main, origin.Inventory))
             {
                 if (TryMove(item, FindFreeSlot(main, item), count))
                 {
@@ -463,7 +568,9 @@ namespace DemandPanel
 
         private static bool TryMove(GameItem item, SlotMarker marker, int count)
         {
-            if (marker == null || marker.targetItem != null || marker.numTransfer < count)
+            if (marker == null || !ReferenceEquals(marker.item, item) || marker.inventory == null
+                || marker.itemGridShape == null || marker.targetItem != null || marker.numTransfer < count
+                || count != item.unitCount || count < 1 || !item.MayRemove() || item.MaxNumRemove() < count)
             {
                 return false;
             }
@@ -472,7 +579,24 @@ namespace DemandPanel
             SelfMove = true;
             try
             {
-                marker.TryAcceptOnce(count);
+                if (marker.inventory is GameSlotInventory slot)
+                {
+                    // A slot's UncheckedAccept overwrites its occupant. Do not trust a marker
+                    // captured before Expel callbacks, even on the normal filtered path.
+                    before?.Expel(item);
+                    if (item.parentInventory == null && slot.childItem == null
+                        && item.unitCount == count && IsUsable(slot, item)
+                        && item.CheckIsStateValid(slot, marker, marker.itemGridShape, item.modifiedState)
+                        && slot.CheckAcceptParentShapeStateModifier(item, marker, marker.itemGridShape, item.modifiedState)
+                        && item.MaxNumAdd(marker) >= count)
+                    {
+                        marker.AcceptUnchecked();
+                    }
+                }
+                else
+                {
+                    marker.TryAcceptOnce(count);
+                }
             }
             catch (Exception e)
             {
@@ -490,7 +614,10 @@ namespace DemandPanel
                 SelfMove = true;
                 try
                 {
-                    before.UncheckedAccept(item);
+                    if (HasSpace(before, item, previousShape))
+                    {
+                        before.UncheckedAccept(item);
+                    }
                 }
                 catch (Exception e)
                 {
@@ -504,7 +631,7 @@ namespace DemandPanel
                 {
                     item.modifiedShape = previousShape;
                     GameGridInventory main = EmporiumEntry.Instance?.invElement;
-                    if (main != null)
+                    if (main != null && (!records.TryGetValue(item, out Origin origin) || !origin.Constrained))
                     {
                         try
                         {
@@ -521,7 +648,105 @@ namespace DemandPanel
                     }
                 }
             }
-            return item.parentInventory != null && !ReferenceEquals(item.parentInventory, before);
+            return ReferenceEquals(item.parentInventory, marker.inventory) && item.unitCount == count;
+        }
+
+        private static bool HasSpace(GameInventory inventory, GameItem item, GridShape shape)
+        {
+            if (inventory is GameSlotInventory slot)
+            {
+                return slot.childItem == null || ReferenceEquals(slot.childItem, item);
+            }
+            if (!(inventory is GameGridInventory grid)
+                || !shape.FullyIntersects(grid.inventoryShape, (b, bo) => b != 1 || bo == 0))
+            {
+                return false;
+            }
+            foreach (GameItem other in grid.childItems)
+            {
+                if (!ReferenceEquals(other, item) && shape.Intersects(other.modifiedShape))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        // Bypass only the recorded known product inventory's player-add filter. All lifetime,
+        // ownership, lock, shape, occupancy, stack and parent-modifier guards still apply.
+        private static bool TryOriginalUnchecked(GameItem item, Origin origin, GridShape exact)
+        {
+            GameInventory target = origin.Inventory;
+            int count = item.unitCount;
+            if (!IsUsable(target, item) || !ReferenceEquals(target.GetParentItem(), origin.Owner)
+                || !StockSources.IsAllowedInventory(target, item, out bool product)
+                || !product || !StockSources.IsSafeOwner(item) || count < 1
+                || !item.MayRemove() || item.MaxNumRemove() < count
+                || !HasSpace(target, item, exact))
+            {
+                return false;
+            }
+            var marker = new SlotMarker
+            {
+                item = item, inventory = target, itemGridShape = exact,
+                numTransfer = count, targetItem = null
+            };
+            if (!item.CheckIsStateValid(target, marker, exact, item.modifiedState)
+                || !target.CheckAcceptParentShapeStateModifier(item, marker, exact, item.modifiedState)
+                || item.MaxNumAdd(marker) < count)
+            {
+                return false;
+            }
+            GameInventory before = item.parentInventory;
+            GridShape previous = item.modifiedShape;
+            SelfMove = true;
+            try
+            {
+                // Expel callbacks can change the destination; recheck immediately before commit.
+                before?.Expel(item);
+                if (item.parentInventory == null && item.unitCount == count
+                    && IsUsable(target, item) && ReferenceEquals(target.GetParentItem(), origin.Owner)
+                    && HasSpace(target, item, exact)
+                    && item.CheckIsStateValid(target, marker, exact, item.modifiedState)
+                    && target.CheckAcceptParentShapeStateModifier(item, marker, exact, item.modifiedState)
+                    && item.MaxNumAdd(marker) >= count)
+                {
+                    marker.AcceptUnchecked();
+                }
+            }
+            catch (Exception e)
+            {
+                ModEntry.Log.Log("Original product restore failed for " + item.identifier + ": " + e.Message);
+            }
+            finally
+            {
+                if (item.parentInventory == null && before != null)
+                {
+                    item.modifiedShape = previous;
+                    try
+                    {
+                        if (HasSpace(before, item, previous))
+                        {
+                            before.UncheckedAccept(item);
+                        }
+                    }
+                    catch (Exception e)
+                    {
+                        ModEntry.Log.Log("Product restore recovery failed for " + item.identifier + ": " + e.Message);
+                    }
+                }
+                SelfMove = false;
+            }
+            return ReferenceEquals(item.parentInventory, target) && item.unitCount == count;
+        }
+
+        private static void RestoreHiddenTag(GameItem item, Origin origin)
+        {
+            if (origin.HadHiddenTag && ReferenceEquals(item.parentInventory, origin.Inventory)
+                && IsUsable(origin.Inventory, item) && !item.IsTag(ContrabandHelper.ITEM_HIDDEN_TAG))
+            {
+                item.EnableTag(ContrabandHelper.ITEM_HIDDEN_TAG);
+            }
         }
 
         private static bool IsGone(GameItem item)
@@ -531,28 +756,9 @@ namespace DemandPanel
 
         // The origin must still be reachable from the store: every owning item alive and in an
         // inventory, ending at the main inventory or the showcase.
-        private static bool IsUsable(GameInventory inventory)
+        private static bool IsUsable(GameInventory inventory, GameItem item = null)
         {
-            EmporiumEntry store = EmporiumEntry.Instance;
-            if (inventory == null || store == null || inventory.IsInsertLocked())
-            {
-                return false;
-            }
-            GameInventory current = inventory;
-            for (int depth = 0; depth < MaxDepth; depth++)
-            {
-                GameItem owner = current.GetParentItem();
-                if (owner == null)
-                {
-                    return ReferenceEquals(current, store.invElement) || ReferenceEquals(current, store.showcaseElement);
-                }
-                if (IsGone(owner) || owner.parentInventory == null)
-                {
-                    return false;
-                }
-                current = owner.parentInventory;
-            }
-            return false;
+            return StockSources.IsReachable(inventory, item);
         }
     }
 }
