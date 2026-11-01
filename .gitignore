@@ -1,0 +1,11 @@
+decompiled/
+upstream-modding-guide/
+docs/
+CLAUDE.md
+AGENTS.md
+.claude/
+.herdr-work/
+bin/
+obj/
+*.user
+.vs/

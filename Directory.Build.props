@@ -1,0 +1,1 @@
+<Project><PropertyGroup><GameDir>D:\SteamLibrary\steamapps\common\Probably Stolen</GameDir><GameManaged>$(GameDir)\Probably Stolen_Data\Managed</GameManaged><LangVersion>9.0</LangVersion><Nullable>disable</Nullable></PropertyGroup></Project>

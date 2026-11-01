@@ -1,0 +1,24 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DemandPanel.Core", "src\DemandPanel.Core\DemandPanel.Core.csproj", "{57C1253E-541F-4CCC-9B65-18D7FBECE478}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DemandPanel.Core.Tests", "tests\DemandPanel.Core.Tests\DemandPanel.Core.Tests.csproj", "{C866FCD4-070E-4A40-A858-5C4A0EB418A9}"
+EndProject
+Global
+ GlobalSection(SolutionConfigurationPlatforms) = preSolution
+  Debug|Any CPU = Debug|Any CPU
+  Release|Any CPU = Release|Any CPU
+ EndGlobalSection
+ GlobalSection(ProjectConfigurationPlatforms) = postSolution
+  {57C1253E-541F-4CCC-9B65-18D7FBECE478}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+  {57C1253E-541F-4CCC-9B65-18D7FBECE478}.Debug|Any CPU.Build.0 = Debug|Any CPU
+  {57C1253E-541F-4CCC-9B65-18D7FBECE478}.Release|Any CPU.ActiveCfg = Release|Any CPU
+  {57C1253E-541F-4CCC-9B65-18D7FBECE478}.Release|Any CPU.Build.0 = Release|Any CPU
+  {C866FCD4-070E-4A40-A858-5C4A0EB418A9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+  {C866FCD4-070E-4A40-A858-5C4A0EB418A9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+  {C866FCD4-070E-4A40-A858-5C4A0EB418A9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+  {C866FCD4-070E-4A40-A858-5C4A0EB418A9}.Release|Any CPU.Build.0 = Release|Any CPU
+ EndGlobalSection
+EndGlobal
