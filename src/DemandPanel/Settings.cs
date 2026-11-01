@@ -10,15 +10,11 @@ namespace DemandPanel
         private const string Section = "Demand Panel";
 
         private static ConfigEntry<string> toggleKey;
-        private static ConfigEntry<bool> dimOverBudget;
-        private static ConfigEntry<int> cellSize;
 
         public static void Init()
         {
             var cfg = ModHelper.GetConfig(ModEntry.ModId);
             toggleKey = cfg.Define("ToggleKey", KeyCode.F4.ToString(), Section, () => Loc.T("key_toggle_panel"));
-            dimOverBudget = cfg.Define("DimOverBudget", true, Section, () => Loc.T("cfg_dim_over_budget"));
-            cellSize = cfg.Define("CellSize", 48, Section, () => Loc.T("cfg_cell_size"), 32, 96);
         }
 
         public static KeyCode ToggleKey
@@ -43,9 +39,5 @@ namespace DemandPanel
                 toggleKey.Set(key.ToString());
             }
         }
-
-        public static bool DimOverBudget => dimOverBudget == null || dimOverBudget.Value;
-
-        public static int CellSize => cellSize == null ? 48 : Mathf.Clamp(cellSize.Value, 32, 96);
     }
 }

@@ -5,29 +5,35 @@ namespace DemandPanel
 {
     internal sealed class Driver : MonoBehaviour
     {
-        // PlayerStore.OnWeightedAreaChanged was not checked for a plain C# event, and a timer needs
-        // no Harmony patch, so the open panel re-reads the game on this interval.
-        private const float RefreshSeconds = 0.5f;
-
         // Only used when the mod is enabled in the middle of a scene, after the tablet was built.
         private const float TabletCheckSeconds = 1f;
 
         private static Driver instance;
 
         private readonly PanelController controller = new PanelController();
-        private float nextRefresh;
         private float nextTabletCheck;
 
         private void OnEnable()
         {
             instance = this;
-            PanelView.ClosedByUser += OnPanelClosedByUser;
+            NativePanel.ClosedByPlayer += OnPanelClosedByPlayer;
         }
 
         private void OnDisable()
         {
-            PanelView.ClosedByUser -= OnPanelClosedByUser;
-            PanelView.Close();
+            NativePanel.ClosedByPlayer -= OnPanelClosedByPlayer;
+            // Restore first: the items are only safe once they are back in the store. When the loader
+            // stops the mod it calls OnDisable and then removes all Harmony patches (ModLoader.cs:628,
+            // :639), and this Driver is destroyed, so nothing retries after this. A few attempts here
+            // are the last chance; items that still do not fit stay in the window with a notice.
+            for (int attempt = 0; attempt < 3; attempt++)
+            {
+                NativePanel.Close();
+                if (!NativePanel.HasStuckItems)
+                {
+                    break;
+                }
+            }
             TabletButton.Remove();
             if (instance == this)
             {
@@ -50,22 +56,45 @@ namespace DemandPanel
             switch (controller.OnTogglePressed(customer))
             {
                 case PanelCommand.Open:
-                    var entries = GameAdapter.Snapshot(Settings.DimOverBudget);
-                    if (entries.Count == 0)
-                    {
-                        controller.OnTogglePressed(customer);
-                        PanelView.ShowMessage(Loc.T("msg_no_wanted_stock"));
-                        break;
-                    }
-                    PanelView.Open(entries);
-                    nextRefresh = Time.unscaledTime + RefreshSeconds;
+                    OpenPanel(customer);
                     break;
                 case PanelCommand.Close:
-                    PanelView.Close();
+                    NativePanel.Close();
                     break;
                 case PanelCommand.ShowNoCustomer:
-                    PanelView.ShowMessage(Loc.T("msg_no_customer"));
+                    GameAdapter.ShowMessage(Loc.T("msg_no_customer"));
                     break;
+            }
+        }
+
+        private void OpenPanel(CustomerSnapshot customer)
+        {
+            if (GameAdapter.IsInspectionCustomer())
+            {
+                controller.OnTogglePressed(customer);
+                GameAdapter.ShowMessage(Loc.T("msg_cannot_open_now"));
+                return;
+            }
+            var items = GameAdapter.Snapshot();
+            if (items.Count == 0)
+            {
+                controller.OnTogglePressed(customer);
+                GameAdapter.ShowMessage(Loc.T("msg_no_wanted_stock"));
+                return;
+            }
+            if (!NativePanel.Open(items, out int notMoved))
+            {
+                controller.OnTogglePressed(customer);
+                // Items stuck from an earlier close already got the restore-failed notice.
+                if (!NativePanel.HasStuckItems)
+                {
+                    GameAdapter.ShowMessage(Loc.T("msg_not_fit", notMoved));
+                }
+                return;
+            }
+            if (notMoved > 0)
+            {
+                GameAdapter.ShowMessage(Loc.T("msg_not_fit", notMoved));
             }
         }
 
@@ -73,12 +102,13 @@ namespace DemandPanel
         {
             CustomerSnapshot customer = GameAdapter.GetCustomer();
 
-            // A scene change destroys the window without telling anyone. Follow it, so the next
-            // key press opens the panel again instead of closing a window that is not there.
-            if (controller.IsOpen && !PanelView.IsOpen)
+            // Hidden windows and scene changes are handled here, before anything else this frame.
+            NativePanel.Tick();
+
+            // The window went away without the controller knowing (a scene change, or the game hid it
+            // and the items are back). Follow it so the next key press opens instead of closing.
+            if (controller.IsOpen && !NativePanel.IsOpen)
             {
-                // Close() is safe on a dead window and removes a drag ghost the scene change left behind.
-                PanelView.Close();
                 controller.OnTogglePressed(customer);
             }
 
@@ -89,13 +119,7 @@ namespace DemandPanel
 
             if (controller.OnFrame(customer) == PanelCommand.Close)
             {
-                PanelView.Close();
-            }
-
-            if (controller.IsOpen && Time.unscaledTime >= nextRefresh)
-            {
-                nextRefresh = Time.unscaledTime + RefreshSeconds;
-                PanelView.Refresh(GameAdapter.Snapshot(Settings.DimOverBudget));
+                NativePanel.Close();
             }
 
             if (!TabletButton.IsAlive && Time.unscaledTime >= nextTabletCheck)
@@ -106,8 +130,8 @@ namespace DemandPanel
             TabletButton.SetVisible(GameAdapter.InStore && customer.Eligible);
         }
 
-        // The window's own close button. The window is already gone, so only the controller is left to sync.
-        private void OnPanelClosedByUser()
+        // The window's own close button. The items are already back, so only the controller is left to sync.
+        private void OnPanelClosedByPlayer()
         {
             if (controller.IsOpen)
             {

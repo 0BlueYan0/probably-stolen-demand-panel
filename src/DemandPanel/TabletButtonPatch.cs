@@ -1,14 +1,17 @@
 using System;
 using HarmonyLib;
+using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
 namespace DemandPanel
 {
-    // NegociationUIManager.CreateWindow runs once from Start() in each store scene and ends with the
-    // tablet built and hidden. OpenUI runs on every opening and would need an existence check, so the
-    // postfix goes on CreateWindow. The private field "frame" is injected by its literal name.
-    [HarmonyPatch(typeof(NegociationUIManager), "CreateWindow")]
+    // CreateWindow ends with the whole tablet inactive, and text built and measured under an inactive
+    // parent gets the wrong width (the game's own TabletUI.MeasureWidth warns about it). OpenUI
+    // activates the tablet first, so the button is built there. It runs on every opening, which Build
+    // handles with its one-attempt-per-tablet check. The private field "frame" is injected by its
+    // literal name.
+    [HarmonyPatch(typeof(NegociationUIManager), "OpenUI")]
     internal static class TabletButtonPatch
     {
         private static void Postfix(NegotiationTabletFrame ___frame)
@@ -32,6 +35,9 @@ namespace DemandPanel
         private const float Gap = 8f;
         private const float MinButtonWidth = 120f;
         private const float ButtonPadding = 16f;
+        private const float NarrowButtonWidth = 96f;
+        private const float LabelInset = 8f;
+        private const float LabelMinFontSize = 10f;
 
         private static GameObject button;
 
@@ -61,9 +67,9 @@ namespace DemandPanel
 
         public static bool IsAlive => button != null;
 
-        // The postfix only fires when the mod is already enabled as the scene starts. When the mod is
-        // enabled in the middle of a scene, the Driver calls this to build from the tablet that is
-        // already there (uiObject is a public field).
+        // The postfix only fires when the tablet opens after the mod is enabled. When the mod is
+        // enabled while the tablet is already open, the Driver calls this to build from it
+        // (uiObject is a public field). Build itself ignores a tablet that is not active.
         public static void TryBuildFromScene()
         {
             try
@@ -114,6 +120,11 @@ namespace DemandPanel
             {
                 return;
             }
+            // Not marked as tried, so the next opening builds it.
+            if (!frame.panel.gameObject.activeInHierarchy)
+            {
+                return;
+            }
 
             // One attempt per tablet. When no spot is free, the Driver's once-per-second retry would
             // otherwise measure and log the same result again for the same frame.
@@ -148,37 +159,64 @@ namespace DemandPanel
             float height = Mathf.Clamp(resize.height, 24f, 40f);
             float y = resize.yMin + (resize.height - height) * 0.5f;
             string label = Loc.T("btn_open_panel");
+            float measured;
             var measuringButton = TabletUI.SmallButton(frame, panel, 0f, 0f, MinButtonWidth, height, label, null);
             if (measuringButton == null)
             {
                 return;
             }
-            measuringButton.gameObject.SetActive(false);
-            // The game helper resolves Noto_Sans for the selected locale, or returns null.
-            var localeFont = CustomUIMachineryStyle.Font();
-            if (localeFont != null)
+            try
             {
-                measuringButton.label.font = localeFont;
+                // The panel is active, so the button is too. The game helper resolves Noto_Sans for the
+                // selected locale, or returns null.
+                var localeFont = CustomUIMachineryStyle.Font();
+                if (localeFont != null)
+                {
+                    measuringButton.label.font = localeFont;
+                }
+                measuringButton.label.enableAutoSizing = false;
+                measuringButton.label.fontSize = 16f;
+                measured = TabletUI.MeasureWidth(measuringButton.label, label);
             }
-            measuringButton.label.enableAutoSizing = false;
-            measuringButton.label.fontSize = 16f;
-            measuringButton.label.ForceMeshUpdate(true, true);
-            float buttonWidth = Mathf.Max(MinButtonWidth, measuringButton.label.preferredWidth + ButtonPadding);
-            UnityEngine.Object.Destroy(measuringButton.gameObject);
+            finally
+            {
+                UnityEngine.Object.Destroy(measuringButton.gameObject);
+            }
 
-            // Left of the leftmost of the two corner controls first, right of the rightmost second.
-            float leftX = Mathf.Min(resize.xMin, close.xMin) - Gap - buttonWidth;
-            float rightX = Mathf.Max(resize.xMax, close.xMax) + Gap;
-            float x;
-            if (Fits(leftX, y, buttonWidth, height, panelRect, resize, close, hasBargain, bargain))
+            // The label sits 4 px inside each edge of the button (TabletUI.BuildButton).
+            float wantedWidth = Mathf.Max(MinButtonWidth, measured + LabelInset + ButtonPadding);
+
+            // Full width first. When the free gap is smaller the button shrinks, and the label's own
+            // size range and ellipsis keep the text inside it.
+            float buttonWidth = 0f;
+            float x = 0f;
+            bool placed = false;
+            foreach (float width in new[] { wantedWidth, MinButtonWidth, NarrowButtonWidth })
             {
-                x = leftX;
+                if (width > wantedWidth)
+                {
+                    continue;
+                }
+                // Left of the leftmost of the two corner controls first, right of the rightmost second.
+                float leftX = Mathf.Min(resize.xMin, close.xMin) - Gap - width;
+                float rightX = Mathf.Max(resize.xMax, close.xMax) + Gap;
+                if (Fits(leftX, y, width, height, panelRect, resize, close, hasBargain, bargain))
+                {
+                    x = leftX;
+                }
+                else if (Fits(rightX, y, width, height, panelRect, resize, close, hasBargain, bargain))
+                {
+                    x = rightX;
+                }
+                else
+                {
+                    continue;
+                }
+                buttonWidth = width;
+                placed = true;
+                break;
             }
-            else if (Fits(rightX, y, buttonWidth, height, panelRect, resize, close, hasBargain, bargain))
-            {
-                x = rightX;
-            }
-            else
+            if (!placed)
             {
                 ModEntry.Log.Log("No free spot next to the tablet controls, button not added");
                 return;
@@ -191,6 +229,8 @@ namespace DemandPanel
             {
                 return;
             }
+            created.label.fontSizeMin = LabelMinFontSize;
+            created.label.overflowMode = TextOverflowModes.Ellipsis;
             created.gameObject.name = ButtonName;
             created.gameObject.SetActive(false);
             button = created.gameObject;

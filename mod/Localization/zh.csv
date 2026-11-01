@@ -1,13 +1,9 @@
 # zh.csv
 key_toggle_panel,开关需求面板
-cfg_dim_over_budget,超出客人预算的物品显示为暗色
-cfg_cell_size,面板格子大小
 msg_no_customer,现在没有客人要买东西。
 msg_no_wanted_stock,你的库存里没有这位客人要的商品
+msg_cannot_open_now,保安在场时不能打开
+msg_not_fit,还有 {0} 件放不下
+msg_restore_failed,有物品无法放回原位，暂时留在面板里
 btn_open_panel,查看感兴趣的商品库存
 panel_title,客人要的货（{0}）
-panel_empty,你的物品里没有客人想买的。
-tip_location,位置：{0}
-tip_value,估价：{0}
-msg_counter_full,柜台放不下了。
-msg_item_locked,这个物品现在不能移动。
