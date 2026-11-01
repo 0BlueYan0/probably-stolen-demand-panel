@@ -12,7 +12,6 @@ namespace DemandPanel
         private static readonly List<GameGridInventory> pages = new List<GameGridInventory>();
         private static bool open, restorePending, stuckNoticeShown;
         private static float nextRetry;
-        private static int generation;
         public static bool HasStuckItems => restorePending;
         public static bool IsOpen => open && IsWindowAlive();
         public static event Action ClosedByPlayer;
@@ -33,7 +32,6 @@ namespace DemandPanel
                 int columns = Settings.PageColumns, rows = Settings.PageRows;
                 var plan = StockPageLayout.Plan(items, columns, rows, out notMoved);
                 if (plan.Count == 0) return false;
-                generation++;
                 if (!IsWindowObjectAlive())
                 {
                     if (window != null) GraphHandler.windowGraphNodeRoots?.Remove(window);
@@ -99,7 +97,6 @@ namespace DemandPanel
                 return;
             }
             open = false; restorePending = false; stuckNoticeShown = false;
-            generation++;
             if (IsWindowAlive() && SafeVisible()) window.Hide();
         }
 
@@ -128,7 +125,6 @@ namespace DemandPanel
             pages.Add(page);
             page.EnableTag(HopperHelper.NO_HOPPER_INVENTORY_TAG);
             page.mayInventoryAddItemFunc = (item, inventory) => NativeMover.IsTracked(item);
-            page.onSlotAddItemEndFunc += OnArrived;
             viewport?.RegisterAppendedPage(page);
             return page;
         }
@@ -144,26 +140,6 @@ namespace DemandPanel
                     UnityEngine.Object.Destroy(viewport.handler.gameObject);
             }
             viewport = null; pages.Clear();
-        }
-        private static void OnArrived(GameItem item, GameInventory inventory, SlotMarker slot)
-        {
-            try
-            {
-                if (NativeMover.SelfMove || !NativeMover.IsTracked(item) || !OwnsInventory(inventory)) return;
-                int captured = generation;
-                LetterboxManager.RunNextUpdate(() => SendHome(item, inventory, captured));
-            }
-            catch (Exception e) { ModEntry.Log.Log("Arrival handler failed: " + e.Message); }
-        }
-        private static void SendHome(GameItem item, GameInventory destination, int captured)
-        {
-            try
-            {
-                if (captured != generation || !OwnsInventory(destination) || !ReferenceEquals(item.parentInventory, destination)) return;
-                if (destination is GameGridInventory page && !NativeMover.RestoreOne(item, page))
-                    ModEntry.Log.Log("Dropped item " + item.identifier + " could not go home yet");
-            }
-            catch (Exception e) { ModEntry.Log.Log("Send home failed: " + e.GetType().Name + ": " + e.Message); }
         }
         private static void OnWindowClosed()
         {
