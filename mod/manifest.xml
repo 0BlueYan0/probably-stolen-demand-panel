@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Mod>
+  <ID>demand_panel</ID>
+  <Name>Demand Panel</Name>
+  <ModVersion>0.1.0</ModVersion>
+  <Description>Shows every item you own that the current customer wants to buy, and sends it to the counter with a drag or Alt+click.</Description>
+  <GameVersions><Version>0.46D</Version></GameVersions>
+  <Prerequisites />
+  <Assemblies><Assembly>DemandPanel.dll</Assembly></Assemblies>
+  <Capabilities />
+</Mod>

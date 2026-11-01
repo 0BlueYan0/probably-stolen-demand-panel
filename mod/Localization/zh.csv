@@ -1,0 +1,11 @@
+# zh.csv
+key_toggle_panel,开关需求面板
+cfg_dim_over_budget,超出客人预算的物品显示为暗色
+cfg_cell_size,面板格子大小
+msg_no_customer,现在没有客人要买东西。
+panel_title,客人想买（{0}）
+panel_empty,你的物品里没有客人想买的。
+tip_location,位置：{0}
+tip_value,估价：{0}
+msg_counter_full,柜台放不下了。
+msg_item_locked,这个物品现在不能移动。

@@ -1,0 +1,11 @@
+# en.csv
+key_toggle_panel,Toggle demand panel
+cfg_dim_over_budget,Dim items over the customer's budget
+cfg_cell_size,Panel cell size
+msg_no_customer,No customer is buying right now.
+panel_title,Customer wants ({0})
+panel_empty,Nothing you own matches what the customer wants.
+tip_location,Location: {0}
+tip_value,Value: {0}
+msg_counter_full,The counter is full.
+msg_item_locked,This item cannot be moved.
