@@ -23,6 +23,7 @@ namespace DemandPanel
             public bool Constrained;
             public bool ProductInventory;
             public GameItem Owner;
+            public GameGridInventory PanelGrid;
 
             // Number of items between the origin inventory and the store, so that a bag is put back
             // before the items that came out of it.
@@ -74,10 +75,35 @@ namespace DemandPanel
             return notMoved;
         }
 
-        private static MoveResult MoveOne(GameItem item, GameGridInventory grid)
+        public static int MoveInPlanned(IList<GameItem> items, IList<int> positionsX, IList<int> positionsY, GameGridInventory grid,
+            IList<GameGridInventory> pages, Func<GameItem, GameGridInventory> addPage, out int moved)
         {
-            if (item == null || item.parentInventory == null || item.unitCount < 1
-                || !item.MayRemove() || item.MaxNumRemove() < item.unitCount)
+            moved = 0;
+            int failed = 0;
+            for (int i = 0; i < items.Count; i++)
+            {
+                GameItem item = items[i];
+                try
+                {
+                    switch (MoveOne(item, grid, positionsX[i], positionsY[i], pages, addPage))
+                    {
+                        case MoveResult.Moved: moved++; break;
+                        case MoveResult.NotMoved: failed++; break;
+                    }
+                }
+                catch (Exception e)
+                {
+                    failed++;
+                    ModEntry.Log.Log("Move in failed for " + item?.identifier + ": " + e.GetType().Name + ": " + e.Message);
+                }
+            }
+            return failed;
+        }
+
+        private static MoveResult MoveOne(GameItem item, GameGridInventory grid, int x = -1, int y = -1,
+            IList<GameGridInventory> pages = null, Func<GameItem, GameGridInventory> addPage = null)
+        {
+            if (item == null || item.parentInventory == null)
             {
                 return MoveResult.NotMoved;
             }
@@ -86,16 +112,38 @@ namespace DemandPanel
             {
                 return MoveResult.Travelled;
             }
+            if (item.unitCount < 1 || !item.MayRemove() || item.MaxNumRemove() < item.unitCount)
+            {
+                return MoveResult.NotMoved;
+            }
             if (!StockSources.IsStock(item, EmporiumEntry.Instance, out _))
             {
                 return MoveResult.NotMoved;
             }
 
             Origin origin = RecordOrigin(item);
+            origin.PanelGrid = grid;
             GridShape previousShape = item.modifiedShape;
             // The grid only accepts tracked items, so the record has to exist before the slot scan.
             records[item] = origin;
-            SlotMarker marker = FindFreeSlot(grid, item);
+            SlotMarker marker = x < 0 ? FindFreeSlot(grid, item) : grid.TryInventorySlot(item, item.unitCount,
+                new GridShapeBuilder(item.modifiedShape).SetTransform(x, y, item.modifiedShape.flipped, item.modifiedShape.orientation).Build());
+            if (pages != null && !UsableMoveInMarker(marker, item, grid))
+            {
+                marker = null;
+                foreach (GameGridInventory candidate in pages)
+                {
+                    SlotMarker available = FindFreeSlot(candidate, item);
+                    if (UsableMoveInMarker(available, item, candidate))
+                    { grid = candidate; marker = available; break; }
+                }
+                if (marker == null && addPage != null)
+                {
+                    GameGridInventory candidate = addPage(item);
+                    if (candidate != null) { grid = candidate; marker = FindFreeSlot(grid, item); }
+                }
+                origin.PanelGrid = grid;
+            }
             if (marker == null || !ReferenceEquals(marker.item, item)
                 || !ReferenceEquals(marker.inventory, grid) || marker.targetItem != null
                 || marker.itemGridShape == null || marker.numTransfer < item.unitCount
@@ -109,7 +157,41 @@ namespace DemandPanel
             SelfMove = true;
             try
             {
-                marker.TryAcceptOnce(item.unitCount);
+                if (pages == null)
+                {
+                    marker.TryAcceptOnce(item.unitCount);
+                }
+                else
+                {
+                    // Source callbacks can occupy a reserved cell during Expel. Recheck after them,
+                    // then commit with the native whole-stack marker only while still parentless.
+                    item.parentInventory?.Expel(item);
+                    if (item.parentInventory == null && item.unitCount == origin.UnitCount)
+                    {
+                        marker = grid.TryInventorySlot(item, item.unitCount, marker.itemGridShape);
+                        if (!UsableMoveInMarker(marker, item, grid) || !HasSpace(grid, item, marker.itemGridShape))
+                        {
+                            marker = null;
+                            foreach (GameGridInventory candidate in pages)
+                            {
+                                SlotMarker available = FindFreeSlot(candidate, item);
+                                if (UsableMoveInMarker(available, item, candidate) && HasSpace(candidate, item, available.itemGridShape))
+                                { grid = candidate; marker = available; break; }
+                            }
+                            if (marker == null && addPage != null)
+                            {
+                                GameGridInventory candidate = addPage(item);
+                                if (candidate != null) { grid = candidate; marker = FindFreeSlot(grid, item); }
+                            }
+                            origin.PanelGrid = grid;
+                        }
+                        if (UsableMoveInMarker(marker, item, grid) && HasSpace(grid, item, marker.itemGridShape)
+                            && item.MaxNumRemove() >= item.unitCount && item.MaxNumAdd(marker) >= item.unitCount
+                            && item.CheckIsStateValid(grid, marker, marker.itemGridShape, item.modifiedState)
+                            && grid.CheckAcceptParentShapeStateModifier(item, marker, marker.itemGridShape, item.modifiedState))
+                            marker.TryAcceptOnce(item.unitCount);
+                    }
+                }
             }
             catch (Exception e)
             {
@@ -146,6 +228,10 @@ namespace DemandPanel
             }
             return MoveResult.NotMoved;
         }
+
+        private static bool UsableMoveInMarker(SlotMarker marker, GameItem item, GameGridInventory grid) =>
+            marker != null && ReferenceEquals(marker.item, item) && ReferenceEquals(marker.inventory, grid)
+            && marker.itemGridShape != null && marker.targetItem == null && marker.numTransfer >= item.unitCount;
 
         // An item with no parent is in no inventory and would not be saved. Never overwrite a slot
         // during recovery, and never silently relocate a constrained source to main stock.
@@ -339,7 +425,13 @@ namespace DemandPanel
                 records.Clear();
                 return 0;
             }
-            var pending = GetPending(grid);
+            return RestoreAllPages(new[] { grid }, beforeSave);
+        }
+
+        public static int RestoreAllPages(IReadOnlyCollection<GameGridInventory> pages, bool beforeSave = false)
+        {
+            var owned = new HashSet<GameGridInventory>(pages);
+            var pending = GetPending(owned);
             if (pending.Count == 0)
             {
                 // A reused empty window must not cancel an unrelated drag or selection.
@@ -356,7 +448,7 @@ namespace DemandPanel
             }
 
             // Cancelling a drag can put another tracked item back into the grid.
-            pending = GetPending(grid);
+            pending = GetPending(owned);
             pending.Sort((a, b) => a.Value.Depth.CompareTo(b.Value.Depth));
 
             var remaining = new List<GameItem>();
@@ -367,9 +459,9 @@ namespace DemandPanel
                 {
                     if (pair.Key.parentInventory == null)
                     {
-                        Rescue(pair.Key, pair.Value, grid);
+                        Rescue(pair.Key, pair.Value, pair.Value.PanelGrid);
                         placed = pair.Key.parentInventory != null
-                            && !ReferenceEquals(pair.Key.parentInventory, grid);
+                            && !(pair.Key.parentInventory is GameGridInventory parent && owned.Contains(parent));
                     }
                     if (!placed)
                     {
@@ -413,13 +505,14 @@ namespace DemandPanel
             return stuck;
         }
 
-        private static List<KeyValuePair<GameItem, Origin>> GetPending(GameGridInventory grid)
+        private static List<KeyValuePair<GameItem, Origin>> GetPending(HashSet<GameGridInventory> pages)
         {
             var pending = new List<KeyValuePair<GameItem, Origin>>();
             foreach (KeyValuePair<GameItem, Origin> pair in records)
             {
                 if (!IsGone(pair.Key)
-                    && (pair.Key.parentInventory == null || ReferenceEquals(pair.Key.parentInventory, grid)))
+                    && (pair.Key.parentInventory == null
+                        || (pair.Key.parentInventory is GameGridInventory parent && pages.Contains(parent))))
                 {
                     pending.Add(pair);
                 }

@@ -3,7 +3,9 @@ key_toggle_panel,Toggle demand panel
 msg_no_customer,No customer is buying right now.
 msg_no_wanted_stock,None of your stock is wanted by this customer
 msg_cannot_open_now,Cannot open while security is here
-msg_not_fit,{0} more items do not fit
+msg_not_fit,{0} items could not be moved
 msg_restore_failed,Some items could not be returned and stay in the panel
 btn_open_panel,View Wanted Stock
 panel_title,Wanted Stock ({0})
+setting_page_columns,Stock page columns (4–64)
+setting_page_rows,Stock page rows (4–100)
