@@ -97,7 +97,7 @@ namespace DemandPanel
                 MachineryStyle.Place(inner, 0, 20, w, h);
                 MachineryStyle.Place(previous.handler, 0, 0, 20, 16);
                 MachineryStyle.Place(next.handler, widthPixels - 20, 0, 20, 16);
-                status.SetText((selected + 1) + " / " + pages.Count);
+                status.SetText((selected + 1) + " / " + pages.Count + "  " + grid.inventoryShape.width + "x" + grid.inventoryShape.height);
                 status.ResizePixels(widthPixels - 40, 16);
                 MachineryStyle.Place(status.handler, 20, 0, widthPixels - 40, 16);
                 if (selected == 0) previous.Disable(); else previous.Enable();

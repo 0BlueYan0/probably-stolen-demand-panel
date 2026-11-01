@@ -8,12 +8,11 @@ namespace DemandPanel
         internal sealed class Page
         {
             internal readonly int Columns;
-            internal int Rows;
+            internal readonly int Rows;
             internal readonly List<GameItem> Items = new List<GameItem>();
             internal readonly List<int> X = new List<int>();
             internal readonly List<int> Y = new List<int>();
             private readonly bool[,] occupied;
-            private int usedRows;
 
             internal Page(int columns, int rows)
             {
@@ -34,7 +33,6 @@ namespace DemandPanel
                     if (!free) continue;
                     for (int dy = 0; dy < height; dy++)
                     for (int dx = 0; dx < width; dx++) occupied[y + dy, x + dx] = true;
-                    usedRows = Math.Max(usedRows, y + height);
                     Items.Add(item);
                     X.Add(x);
                     Y.Add(y);
@@ -43,7 +41,6 @@ namespace DemandPanel
                 return false;
             }
 
-            internal void Trim() { Rows = Math.Max(2, usedRows); }
         }
 
         internal static List<Page> Plan(IList<GameItem> items, int columns, int rows, out int invalid)
@@ -58,23 +55,19 @@ namespace DemandPanel
                 int height = Math.Max(1, item.modifiedShape.globalHeight);
                 if (width > columns || height > rows)
                 {
-                    current?.Trim();
                     var oversized = new Page(Math.Max(columns, width), Math.Max(rows, height));
                     oversized.Add(item, width, height);
-                    oversized.Trim();
                     pages.Add(oversized);
                     current = null;
                     continue;
                 }
                 if (current == null || !current.Add(item, width, height))
                 {
-                    current?.Trim();
                     current = new Page(columns, rows);
                     pages.Add(current);
                     current.Add(item, width, height);
                 }
             }
-            current?.Trim();
             return pages;
         }
     }

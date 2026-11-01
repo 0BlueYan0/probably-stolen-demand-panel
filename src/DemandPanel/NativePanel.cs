@@ -12,6 +12,10 @@ namespace DemandPanel
         private static readonly List<GameGridInventory> pages = new List<GameGridInventory>();
         private static bool open, restorePending, stuckNoticeShown;
         private static float nextRetry;
+        private static int sessionColumns, sessionRows;
+        private static Vector2 lastPosition;
+        private static bool hasPosition;
+        private static readonly HashSet<GameGridInventory> pendingCapacity = new HashSet<GameGridInventory>();
         public static bool HasStuckItems => restorePending;
         public static bool IsOpen => open && IsWindowAlive();
         public static event Action ClosedByPlayer;
@@ -32,6 +36,7 @@ namespace DemandPanel
                 int columns = Settings.PageColumns, rows = Settings.PageRows;
                 var plan = StockPageLayout.Plan(items, columns, rows, out notMoved);
                 if (plan.Count == 0) return false;
+                sessionColumns = columns; sessionRows = rows;
                 if (!IsWindowObjectAlive())
                 {
                     if (window != null) GraphHandler.windowGraphNodeRoots?.Remove(window);
@@ -52,7 +57,7 @@ namespace DemandPanel
                 viewport = new NativePagedViewport(pages, Math.Max(32, (int)(availableWidth * .8f) - 32), Math.Max(32, (int)(availableHeight * .8f) - 80));
                 window.Attach(viewport);
                 window.Validate();
-                window.Center();
+                RestorePosition();
                 open = true;
                 stuckNoticeShown = false;
                 int moved = 0;
@@ -63,6 +68,8 @@ namespace DemandPanel
                     moved += pageMoved;
                 }
                 if (moved == 0) { Close(); return false; }
+                pendingCapacity.Clear();
+                EnsureSpareForFullPages();
                 window.SetTitle(Loc.T("panel_title", moved));
                 window.Validate();
                 return true;
@@ -77,6 +84,8 @@ namespace DemandPanel
 
         public static void Close(bool beforeSave = false)
         {
+            pendingCapacity.Clear();
+            if (open && IsWindowAlive()) CapturePosition();
             int stuck;
             try { stuck = NativeMover.RestoreAllPages(pages, beforeSave); }
             catch (Exception e) { ModEntry.Log.Log("RestoreAllPages failed: " + e.GetType().Name + ": " + e.Message); stuck = 1; }
@@ -91,7 +100,12 @@ namespace DemandPanel
                         foreach (var item in pages[i].childItems) if (NativeMover.IsTracked(item)) { found = true; break; }
                         if (found) { viewport.Select(i); break; }
                     }
-                    if (!SafeVisible()) window.Show();
+                    if (!SafeVisible())
+                    {
+                        window.Show();
+                        window.Validate();
+                        RestorePosition();
+                    }
                 }
                 if (!stuckNoticeShown) { stuckNoticeShown = true; GameAdapter.ShowMessage(Loc.T("msg_restore_failed")); }
                 return;
@@ -105,7 +119,15 @@ namespace DemandPanel
             if (!open) return;
             if (!IsWindowAlive()) { Close(); return; }
             if (!SafeVisible() || (restorePending && Time.unscaledTime >= nextRetry))
-            { nextRetry = Time.unscaledTime + RetrySeconds; Close(); }
+            { nextRetry = Time.unscaledTime + RetrySeconds; Close(); return; }
+            if (!restorePending && pendingCapacity.Count > 0 &&
+                (ItemMouseDragHandler.current == null || ItemMouseDragHandler.current.GetCurrentItem() == null))
+            {
+                var pending = new List<GameGridInventory>(pendingCapacity);
+                pendingCapacity.Clear();
+                foreach (var page in pending)
+                    if (OwnsInventory(page) && !page.HasFreeCell()) EnsureSpareForFullPages();
+            }
         }
 
         private static bool IsWindowAlive()
@@ -123,10 +145,39 @@ namespace DemandPanel
         {
             var page = new GameGridInventory(columns, rows).SetMachineryStyle();
             pages.Add(page);
+            ModEntry.Log.Log("Demand stock page " + pages.Count + ": " + page.inventoryShape.width + "x" + page.inventoryShape.height);
             page.EnableTag(HopperHelper.NO_HOPPER_INVENTORY_TAG);
             page.mayInventoryAddItemFunc = (item, inventory) => NativeMover.IsTracked(item);
+            page.onSlotAddItemLateFunc += (item, inventory, slot) =>
+            {
+                if (open && !restorePending) pendingCapacity.Add(page);
+            };
             viewport?.RegisterAppendedPage(page);
             return page;
+        }
+        private static void EnsureSpareForFullPages()
+        {
+            bool full = false;
+            foreach (var page in pages)
+            {
+                if (page.childItems.Count == 0) return;
+                if (!page.HasFreeCell()) full = true;
+            }
+            if (full) CreatePage(sessionColumns, sessionRows);
+        }
+        private static void CapturePosition()
+        {
+            lastPosition = window.rectTransform.anchoredPosition;
+            hasPosition = true;
+        }
+        private static void RestorePosition()
+        {
+            if (hasPosition)
+            {
+                window.rectTransform.anchoredPosition = lastPosition;
+                window.FixBounds();
+            }
+            else window.Center();
         }
         private static void DisposeEmptyWindow()
         {
