@@ -16,8 +16,8 @@ namespace DemandPanel
             this.onChanged = onChanged;
             track = TreeNodeRender.Instantiate().SetParent(parent);
             thumb = TreeNodeRender.Instantiate().SetParent(track);
-            track.image.sprite = RenderHandler.LoadFromAtlas("Window/elements_outer", "border_right_scrollbar");
-            thumb.image.sprite = RenderHandler.LoadFromAtlas("Window/elements_outer", "border_right_scrollbar_button");
+            MachineryStyle.SetSliced(track, MachineryStyle.PlateNotched, MachineryStyle.SLIDER_TRACK);
+            MachineryStyle.SetFlat(thumb, MachineryStyle.SLIDER_FILL);
             track.image.SetNativeSize();
             thumb.image.SetNativeSize();
             track.image.enabled = true;
