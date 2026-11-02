@@ -12,8 +12,9 @@ namespace DemandPanel
         private readonly List<Vector2> offsets = new List<Vector2>();
         private readonly int maxWidth, maxHeight;
         private readonly MachineryButton previous, next;
-        private readonly MachineryText status, xLabel, yLabel;
-        private readonly MachinerySlider xSlider, ySlider;
+        private readonly MachineryText status;
+        private readonly MachinerySlider xSlider;
+        private readonly NativeVerticalScrollbar yScrollbar;
         private bool validating;
         private int selected;
         public bool canResize => false;
@@ -38,14 +39,11 @@ namespace DemandPanel
             previous = new MachineryButton("<", () => Select(selected - 1), 20, 16);
             next = new MachineryButton(">", () => Select(selected + 1), 20, 16);
             status = new MachineryText("", 7, HorizontalAlignmentOptions.Center, false);
-            xLabel = new MachineryText("X", 7, HorizontalAlignmentOptions.Center, false);
-            yLabel = new MachineryText("Y", 7, HorizontalAlignmentOptions.Center, false);
-            xSlider = new MachinerySlider(0f, this.maxWidth - 16).SetFillWidth(false);
-            ySlider = new MachinerySlider(0f, this.maxWidth - 16).SetFillWidth(false);
-            foreach (PixelElement control in new PixelElement[] { previous, next, status, xLabel, yLabel, xSlider, ySlider })
+            xSlider = new MachinerySlider(0f, this.maxWidth).SetFillWidth(false);
+            yScrollbar = new NativeVerticalScrollbar(handler, value => SetPan(offsets[selected].x, value));
+            foreach (PixelElement control in new PixelElement[] { previous, next, status, xSlider })
                 control.handler.SetParent(handler);
             xSlider.onChanged = value => SetPan(value, offsets[selected].y);
-            ySlider.onChanged = value => SetPan(offsets[selected].x, value);
             foreach (GameGridInventory page in pages)
             {
                 offsets.Add(Vector2.zero);
@@ -79,6 +77,24 @@ namespace DemandPanel
             y = Mathf.Clamp(y, 0f, Math.Max(0, grid.heightPixels - Math.Min(maxHeight, grid.heightPixels)));
             offsets[selected] = new Vector2(x, y);
             grid.rectTransform.anchoredPosition = new Vector2(-x, y);
+            xSlider.SetValue(x);
+            yScrollbar.SetValue(y);
+        }
+
+        // TreeNodeRender does not bubble wheel events from item/background nodes.
+        internal bool Scroll(Vector2 delta, bool horizontal)
+        {
+            if (pages.Count == 0 || (ItemMouseDragHandler.current != null && ItemMouseDragHandler.current.GetCurrentItem() != null))
+                return false;
+            var grid = pages[selected];
+            float step = Math.Max(1, UISettings.current.gridSize) * 3;
+            Vector2 position = offsets[selected];
+            bool onlyHorizontal = grid.heightPixels <= maxHeight && grid.widthPixels > maxWidth;
+            float dx = delta.x;
+            if ((horizontal || onlyHorizontal) && dx == 0f) dx = delta.y;
+            float dy = horizontal || onlyHorizontal ? 0f : delta.y;
+            SetPan(position.x - dx * step, position.y - dy * step);
+            return true;
         }
 
         public void Validate()
@@ -92,8 +108,8 @@ namespace DemandPanel
                 int w = Math.Min(maxWidth, grid.widthPixels), h = Math.Min(maxHeight, grid.heightPixels);
                 int maxX = Math.Max(0, grid.widthPixels - w), maxY = Math.Max(0, grid.heightPixels - h);
                 bool showX = maxX > 0, showY = maxY > 0;
-                widthPixels = Math.Max(160, w);
-                heightPixels = 20 + h + (showX ? 12 : 0) + (showY ? 12 : 0);
+                widthPixels = Math.Max(160, w + (showY ? 12 : 0));
+                heightPixels = 20 + h + (showX ? 12 : 0);
                 MachineryStyle.Place(inner, 0, 20, w, h);
                 MachineryStyle.Place(previous.handler, 0, 0, 20, 16);
                 MachineryStyle.Place(next.handler, widthPixels - 20, 0, 20, 16);
@@ -102,15 +118,11 @@ namespace DemandPanel
                 MachineryStyle.Place(status.handler, 20, 0, widthPixels - 40, 16);
                 if (selected == 0) previous.Disable(); else previous.Enable();
                 if (selected == pages.Count - 1) next.Disable(); else next.Enable();
-                xSlider.SetWidth(Math.Max(16, widthPixels - 16)).SetRange(0, maxX, 1);
-                ySlider.SetWidth(Math.Max(16, widthPixels - 16)).SetRange(0, maxY, 1);
-                xSlider.handler.gameObject.SetActive(showX); xLabel.handler.gameObject.SetActive(showX);
-                ySlider.handler.gameObject.SetActive(showY); yLabel.handler.gameObject.SetActive(showY);
-                int y = 20 + h;
-                if (showX) { MachineryStyle.Place(xLabel.handler, 0, y, 16, 8); MachineryStyle.Place(xSlider.handler, 16, y, widthPixels - 16, 8); y += 12; }
-                if (showY) { MachineryStyle.Place(yLabel.handler, 0, y, 16, 8); MachineryStyle.Place(ySlider.handler, 16, y, widthPixels - 16, 8); }
+                xSlider.SetWidth(Math.Max(16, w)).SetRange(0, maxX, 1);
+                xSlider.handler.gameObject.SetActive(showX);
+                if (showX) MachineryStyle.Place(xSlider.handler, 0, 20 + h + 2, w, 8);
+                yScrollbar.Place(w + 3, 20, h, grid.heightPixels);
                 SetPan(offsets[selected].x, offsets[selected].y);
-                xSlider.SetValue(offsets[selected].x); ySlider.SetValue(offsets[selected].y);
             }
             finally { validating = false; }
         }
